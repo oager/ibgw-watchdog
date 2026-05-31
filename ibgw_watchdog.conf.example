@@ -1,0 +1,59 @@
+# =============================================================================
+# ibgw_watchdog.conf.example — Copy to ibgw_watchdog.conf and edit
+# Run: chmod 600 ibgw_watchdog.conf   (keeps credentials protected)
+# =============================================================================
+
+# IB Gateway API port. Leave blank to auto-detect.
+# Paper trading = 4002 (default). Live trading = 4001.
+IBGW_PORT=4002
+
+# Path to ibgateway binary. Leave blank to auto-detect from common locations.
+# Example: /home/user/Jts/ibgateway/1037/ibgateway
+IBGW_BIN=
+
+# X display for headless/VNC setups (usually :1)
+DISPLAY_ENV=:1
+
+# Credentials file (separate from config for security). Format: IB_USER= / IB_PASS=
+# Create: touch ~/.ibgw_creds && chmod 600 ~/.ibgw_creds
+CREDS_FILE=~/.ibgw_creds
+
+# true = dismiss the paper trading warning popup after login
+PAPER_TRADING=true
+
+# --- Alerts: configure any/all of these ---
+
+# Discord webhook URL (Server Settings > Integrations > Webhooks)
+ALERT_DISCORD_WEBHOOK=
+
+# Telegram bot (get token from @BotFather, chat_id from @userinfobot)
+ALERT_TELEGRAM_TOKEN=
+ALERT_TELEGRAM_CHAT_ID=
+
+# Generic webhook — receives JSON: {level, title, message, ts}
+# Works with Slack incoming webhooks, PagerDuty, ntfy.sh, etc.
+ALERT_WEBHOOK_URL=
+
+# --- Timing ---
+CHECK_INTERVAL=30       # seconds between port checks
+PORT_UP_TIMEOUT=60      # seconds to wait for port after binary start
+LOGIN_WAIT=30           # seconds to poll after login attempt
+WINDOW_SETTLE=2         # seconds after xdotool focus before typing
+ESCALATION_CAP=6        # consecutive failures before CRITICAL alert
+
+# --- Paths ---
+LOG_DIR=~/logs
+SCREENSHOT_DIR=~/logs/ibgw_screenshots
+
+# --- Login dialog coordinates (window-relative pixels) ---
+# Defaults work for IB Gateway 1037 on standard Linux desktop.
+# If auto-login fails, run:  bash ibgw_watchdog.sh --calibrate
+# with the IB Gateway login dialog open.
+UNAME_X=410
+UNAME_Y=250
+PASS_X=410
+PASS_Y=310
+BTN_X=395
+BTN_Y=375
+WARN_BTN_X=0    # paper trading warning OK button (0 = auto-detect center)
+WARN_BTN_Y=0
