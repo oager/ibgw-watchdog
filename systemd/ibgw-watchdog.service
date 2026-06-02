@@ -20,6 +20,9 @@ Environment=DISPLAY=@DISPLAY@
 ExecStart=/usr/bin/env bash @SCRIPT_PATH@
 Restart=on-failure
 RestartSec=10
+# Only kill the watchdog script on stop/restart — leave IB Gateway (a child it
+# launches) running, so managing the watchdog doesn't drop a live session.
+KillMode=process
 
 [Install]
 WantedBy=@WANTED_BY@

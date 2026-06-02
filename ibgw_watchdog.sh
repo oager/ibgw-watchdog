@@ -194,9 +194,9 @@ calibrate() {
     echo "Press Enter when ready..."
     read -r
     local win
-    win=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "IB Gateway" 2>/dev/null | head -1 || true)
+    win=$(ibgw_windows | head -1)
     if [[ -z "$win" ]]; then
-        echo "ERROR: No 'IB Gateway' window found. Open IB Gateway login first."
+        echo "ERROR: No IB Gateway window found. Open IB Gateway login first."
         exit 1
     fi
     echo "Found window: $win  $(DISPLAY=$DISPLAY_ENV xdotool getwindowgeometry "$win" 2>/dev/null)"
@@ -258,19 +258,56 @@ kill_ibgw() {
     sleep 2
 }
 
+# IBKR rebrands the window TITLE between versions ("IB Gateway" → "IBKR Gateway"
+# → …), which silently broke a --name "IB Gateway" search. The install4j
+# WM_CLASS is stable across versions, so match on that, with a title-regex
+# fallback for older builds.
+IBGW_WM_CLASS="install4j-ibgateway-GWClient"
+
+ibgw_windows() {
+    local wins
+    wins=$(DISPLAY="$DISPLAY_ENV" xdotool search --class "$IBGW_WM_CLASS" 2>/dev/null || true)
+    [[ -z "$wins" ]] && wins=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "IB.*Gateway" 2>/dev/null || true)
+    echo "$wins"
+}
+
+# The login frame is a "…Gateway"-titled window narrower than the main window
+# (≈790px vs ≈1850px). The width band also excludes the app's helper dialogs
+# (Warning, Pending Tasks, Content window, 1×1 stubs), which share the class.
+find_login_window() {
+    local w name width
+    for w in $(ibgw_windows); do
+        name=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowname "$w" 2>/dev/null || echo "")
+        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
+            | grep -oP 'Geometry: \K\d+' | head -1)
+        [[ -z "$width" ]] && continue
+        if [[ "$name" == *[Gg]ateway* && "$width" -ge 100 && "$width" -lt 900 ]]; then
+            echo "$w"; return 0
+        fi
+    done
+    return 1
+}
+
+# True when IBGW's wide main dashboard (≥900px "…Gateway") is open — i.e. we are
+# logged in. The login form and the post-login status window are the SAME ~790px
+# window (it transforms in place), so the only reliable "logged in" tell is the
+# main dashboard appearing alongside it.
+ibgw_main_window_present() {
+    local w name width
+    for w in $(ibgw_windows); do
+        name=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowname "$w" 2>/dev/null || echo "")
+        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
+            | grep -oP 'Geometry: \K\d+' | head -1)
+        [[ -n "$width" && "$name" == *[Gg]ateway* && "$width" -ge 900 ]] && return 0
+    done
+    return 1
+}
+
 do_xdotool_login() {
     log "Attempting xdotool auto-login (DISPLAY=$DISPLAY_ENV)"
     screenshot "pre_login"
-    local wid="" all_wids
-    all_wids=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "IB Gateway" 2>/dev/null || true)
-    [[ -z "$all_wids" ]] && log "No IB Gateway window found" && return 1
-    for w in $all_wids; do
-        local width
-        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
-            | grep -oP 'Geometry: \K\d+' | head -1)
-        [[ -n "$width" && "$width" -lt 900 ]] && wid=$w && break
-    done
-    [[ -z "$wid" ]] && wid=$(echo "$all_wids" | tail -1)
+    local wid
+    wid=$(find_login_window) || { log "No IB Gateway login window found"; return 1; }
     log "Using window ID: $wid"
     DISPLAY="$DISPLAY_ENV" xdotool windowfocus --sync "$wid" 2>/dev/null || true
     sleep "$WINDOW_SETTLE"
@@ -404,13 +441,17 @@ handle_login_error_dialog() {
 }
 
 handle_gateway_error_dialog() {
-    local dlg
-    dlg=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "GATEWAY" 2>/dev/null | head -1 || true)
+    # "GATEWAY" matches case-insensitively, so it also hits the main window
+    # (>700px) and install4j's 1px stub windows (whose class contains
+    # "gateway"). A real error modal sits in between — only act on that band,
+    # or the handler kills a healthy logged-in session.
+    local dlg="" w width
+    for w in $(DISPLAY="$DISPLAY_ENV" xdotool search --name "GATEWAY" 2>/dev/null || true); do
+        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
+            | grep -oP 'Geometry: \K\d+' | head -1)
+        [[ -n "$width" && "$width" -ge 100 && "$width" -le 700 ]] && dlg=$w && break
+    done
     [[ -z "$dlg" ]] && return 1
-    local width
-    width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$dlg" 2>/dev/null \
-        | grep -oP 'Geometry: \K\d+')
-    [[ -n "$width" && "$width" -gt 700 ]] && return 1
     log "Gateway error dialog (WID=$dlg, ${width}px) — clicking OK then restart"
     send_alert "WARNING" "IBGW Gateway Error" "Error modal WID=$dlg. Restarting for clean session."
     screenshot "gateway_error_dialog"
@@ -429,16 +470,15 @@ handle_existing_session_dialog() {
 }
 
 check_midsession_login_dialog() {
-    local wid="" all_wids
-    all_wids=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "IB Gateway" 2>/dev/null || true)
-    [[ -z "$all_wids" ]] && return 1
-    for w in $all_wids; do
-        local width
-        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
-            | grep -oP 'Geometry: \K\d+' | head -1)
-        [[ -n "$width" && "$width" -lt 900 ]] && wid=$w && break
-    done
-    [[ -z "$wid" ]] && return 1
+    local wid
+    wid=$(find_login_window) || return 1
+    # If the main dashboard is open we are logged in, and this ~790px window is
+    # the connected status view — NOT a login prompt. Re-typing credentials into
+    # it would be wrong, so only act when the dashboard is absent (genuinely back
+    # at the login screen). Trade-off: a mid-session re-auth prompt shown while
+    # the dashboard stays open won't auto-recover here; a true disconnect that
+    # drops port 4002 is still caught by the port-down restart path.
+    ibgw_main_window_present && return 1
     log "Mid-session login dialog (WID=$wid) — port up but IB servers disconnected"
     do_xdotool_login || true
     return 0
