@@ -1,0 +1,25 @@
+# =============================================================================
+# ibgw-watchdog.service — systemd USER unit for the IB Gateway watchdog
+# =============================================================================
+# Do not edit by hand — run ./install.sh, which fills the @PLACEHOLDERS@ below
+# and installs the result to ~/.config/systemd/user/ibgw-watchdog.service.
+#
+# To install manually instead: copy this file, replace every @PLACEHOLDER@,
+# then:  systemctl --user daemon-reload && systemctl --user enable --now ibgw-watchdog
+# =============================================================================
+[Unit]
+Description=IB Gateway auto-recovery watchdog
+Documentation=https://github.com/oager/ibgw-watchdog
+After=@AFTER@
+@EXTRA_UNIT@
+
+[Service]
+Type=simple
+Environment=DISPLAY=@DISPLAY@
+@XAUTH_LINE@
+ExecStart=/usr/bin/env bash @SCRIPT_PATH@
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=@WANTED_BY@

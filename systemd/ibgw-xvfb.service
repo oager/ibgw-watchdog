@@ -1,0 +1,21 @@
+# =============================================================================
+# ibgw-xvfb.service — headless virtual display for IB Gateway
+# =============================================================================
+# Installed by ./install.sh ONLY when you choose "xvfb" (headless) mode.
+# Provides display :99 so IB Gateway can run on a box with no physical desktop.
+#
+# To view/calibrate the headless Gateway, attach a VNC server to :99, e.g.:
+#   x11vnc -display :99 -localhost -nopw -forever &
+# =============================================================================
+[Unit]
+Description=Xvfb virtual display for IB Gateway watchdog
+Documentation=https://github.com/oager/ibgw-watchdog
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

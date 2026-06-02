@@ -41,9 +41,40 @@ echo "IB_PASS=your_ibkr_password" >> ~/.ibgw_creds
 # 4. Calibrate coordinates (first time only — open IB Gateway login dialog first)
 bash ibgw_watchdog.sh --calibrate
 
-# 5. Start
+# 5a. Start now (foreground test / one-off)
 nohup bash ibgw_watchdog.sh >> ~/logs/ibgw_watchdog.log 2>&1 &
+
+# 5b. …or install as a boot service so it auto-starts on every reboot (recommended)
+./install.sh
 ```
+
+---
+
+## Auto-start on boot
+
+`./install.sh` registers the watchdog as a **systemd user service** and enables
+[linger](https://www.freedesktop.org/software/systemd/man/loginctl.html#enable-linger%20USER%E2%80%A6)
+so it starts at boot without an interactive login. It asks one question — how IB
+Gateway gets an X display:
+
+| Mode | Use when | Hands-off at boot? |
+|---|---|---|
+| **attach** | You have a desktop or VNC session (physical or remote) | Only if the desktop **auto-logs-in** — otherwise the watchdog waits until you log in |
+| **xvfb** | Headless box, no desktop | Yes — the watchdog owns a virtual display (`:99`); attach a VNC viewer to `:99` to see/calibrate the Gateway |
+
+```bash
+./install.sh                 # interactive: pick attach or xvfb
+
+systemctl --user status ibgw-watchdog       # check it
+journalctl --user-unit ibgw-watchdog -f     # follow logs
+systemctl --user disable --now ibgw-watchdog # remove from boot
+```
+
+> **attach mode + true hands-off boot:** the watchdog can only drive IB Gateway
+> once an X session exists. If your box requires a manual desktop login after a
+> reboot, enable your display manager's auto-login (e.g. GDM:
+> `AutomaticLoginEnable=true` / `AutomaticLogin=<user>` in `/etc/gdm3/custom.conf`),
+> or use **xvfb** mode, which needs no desktop login at all.
 
 ---
 

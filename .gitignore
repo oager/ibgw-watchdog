@@ -1,0 +1,10 @@
+# Local config + credentials (never commit)
+ibgw_watchdog.conf
+.ibgw_creds
+
+# Runtime artifacts
+logs/
+*.log
+
+# Tooling scratch
+.claude-flow/

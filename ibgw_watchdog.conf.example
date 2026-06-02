@@ -11,7 +11,9 @@ IBGW_PORT=4002
 # Example: /home/user/Jts/ibgateway/1037/ibgateway
 IBGW_BIN=
 
-# X display for headless/VNC setups (usually :1)
+# X display the Gateway runs on. attach mode: your desktop/VNC display (often
+# :0 or :1). xvfb mode: :99. ./install.sh sets this for you when configuring
+# auto-start; set it by hand only if you start the watchdog manually.
 DISPLAY_ENV=:1
 
 # Credentials file (separate from config for security). Format: IB_USER= / IB_PASS=
