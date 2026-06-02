@@ -350,19 +350,7 @@ do_xdotool_login() {
         warn_wid=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "Warning" 2>/dev/null | head -1 || true)
         if [[ -n "$warn_wid" ]]; then
             log "Dismissing paper-trading Warning popup (WID=$warn_wid)"
-            DISPLAY="$DISPLAY_ENV" xdotool windowfocus --sync "$warn_wid"; sleep 0.5
-            if [[ "${WARN_BTN_X:-0}" -gt 0 && "${WARN_BTN_Y:-0}" -gt 0 ]]; then
-                DISPLAY="$DISPLAY_ENV" xdotool mousemove "$WARN_BTN_X" "$WARN_BTN_Y"
-            else
-                local geo gx gy gw gh
-                geo=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$warn_wid" 2>/dev/null || echo "")
-                gx=$(echo "$geo" | grep -oP 'Position: \K\d+' || echo 0)
-                gy=$(echo "$geo" | grep -oP 'Position: \d+,\K\d+' || echo 0)
-                gw=$(echo "$geo" | grep -oP 'Geometry: \K\d+' || echo 100)
-                gh=$(echo "$geo" | grep -oP 'Geometry: \d+x\K\d+' || echo 100)
-                DISPLAY="$DISPLAY_ENV" xdotool mousemove $(( gx + gw / 2 )) $(( gy + gh * 3 / 4 ))
-            fi
-            DISPLAY="$DISPLAY_ENV" xdotool click 1; sleep 0.5
+            _dismiss_ok "$warn_wid"
             screenshot "post_accept"
         fi
     fi
@@ -410,22 +398,29 @@ restart_and_login() {
 
 # ── Dialog handlers ───────────────────────────────────────────────────────────
 
+# Dismiss a Swing dialog by triggering its default button.
+#
+# CRITICAL: use XTEST events (plain `xdotool key`/`click`, NO --window). The
+# --window form sends XSendEvent, which Java Swing drops via XFilterEvent, so
+# those keystrokes/clicks silently do nothing. XTEST is real input and reaches
+# Swing — the login typing works for exactly this reason.
+#
+# The default button is focused, so Return usually does it. Fallback clicks the
+# button by position: on IBKR dialogs (e.g. the paper-trading "I understand and
+# accept") it sits low — ~88% of dialog height, not the 3/4 mark.
 _dismiss_ok() {
-    local dlg="$1"
-    DISPLAY="$DISPLAY_ENV" xdotool windowfocus --sync "$dlg" 2>/dev/null || true
+    local dlg="$1" WINDOW X Y WIDTH HEIGHT SCREEN
+    DISPLAY="$DISPLAY_ENV" xdotool windowactivate --sync "$dlg" 2>/dev/null || true
+    sleep 0.4
+    DISPLAY="$DISPLAY_ENV" xdotool key Return 2>/dev/null || true
+    sleep 1
+    # If still mapped, click the default button via XTEST.
+    DISPLAY="$DISPLAY_ENV" xwininfo -id "$dlg" 2>/dev/null | grep -q IsViewable || return 0
+    eval "$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry --shell "$dlg" 2>/dev/null)"
+    [[ -n "${WIDTH:-}" && -n "${HEIGHT:-}" ]] || return 0
+    DISPLAY="$DISPLAY_ENV" xdotool mousemove $(( X + WIDTH / 2 )) $(( Y + HEIGHT * 88 / 100 )) 2>/dev/null || true
     sleep 0.3
-    DISPLAY="$DISPLAY_ENV" xdotool key --window "$dlg" Return 2>/dev/null || true
-    sleep 0.5
-    local geo gx gy gw gh
-    geo=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$dlg" 2>/dev/null || echo "")
-    gx=$(echo "$geo" | grep -oP 'Position: \K\d+' || echo 0)
-    gy=$(echo "$geo" | grep -oP 'Position: \d+,\K\d+' || echo 0)
-    gw=$(echo "$geo" | grep -oP 'Geometry: \K\d+' || echo 0)
-    gh=$(echo "$geo" | grep -oP 'Geometry: \d+x\K\d+' || echo 0)
-    if [[ "$gw" -gt 0 && "$gh" -gt 0 ]]; then
-        DISPLAY="$DISPLAY_ENV" xdotool mousemove $(( gx + gw / 2 )) $(( gy + gh * 3 / 4 ))
-        sleep 0.3; DISPLAY="$DISPLAY_ENV" xdotool click 1
-    fi
+    DISPLAY="$DISPLAY_ENV" xdotool click 1 2>/dev/null || true
 }
 
 handle_login_error_dialog() {
