@@ -253,9 +253,71 @@ calibrate() {
 
 kill_ibgw() {
     log "Killing IBGW process..."
-    pkill -f "i4j_jres.*java" 2>/dev/null || true
-    pkill -f "ibgateway" 2>/dev/null || true
+    # Escalate SIGTERM -> SIGKILL. A hung gateway ignores SIGTERM and survives
+    # to hold the IB login session, blocking port 4002 and triggering an endless
+    # respawn loop (incident 2026-06-11). Confirm it is dead before returning so
+    # the caller never stacks a duplicate gateway.
+    pkill -TERM -f "i4j_jres.*java" 2>/dev/null || true
+    pkill -TERM -f "ibgateway"      2>/dev/null || true
+    local i
+    for i in 1 2 3 4 5; do
+        sleep 1
+        pgrep -f "i4j_jres.*java" >/dev/null 2>&1 || { log "IBGW stopped (SIGTERM)"; return 0; }
+    done
+    log "IBGW survived SIGTERM -- escalating to SIGKILL"
+    pkill -KILL -f "i4j_jres.*java" 2>/dev/null || true
+    pkill -KILL -f "ibgateway"      2>/dev/null || true
     sleep 2
+    if pgrep -f "i4j_jres.*java" >/dev/null 2>&1; then
+        log "ERROR: IBGW still alive after SIGKILL -- manual intervention needed"
+    else
+        log "IBGW killed (SIGKILL)"
+    fi
+}
+
+# IBKR rebrands the window TITLE between versions ("IB Gateway" → "IBKR Gateway"
+# → …), which silently broke a --name "IB Gateway" search. The install4j
+# WM_CLASS is stable across versions, so match on that, with a title-regex
+# fallback for older builds.
+IBGW_WM_CLASS="install4j-ibgateway-GWClient"
+
+ibgw_windows() {
+    local wins
+    wins=$(DISPLAY="$DISPLAY_ENV" xdotool search --class "$IBGW_WM_CLASS" 2>/dev/null || true)
+    [[ -z "$wins" ]] && wins=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "IB.*Gateway" 2>/dev/null || true)
+    echo "$wins"
+}
+
+# The login frame is a "…Gateway"-titled window narrower than the main window
+# (≈790px vs ≈1850px). The width band also excludes the app's helper dialogs
+# (Warning, Pending Tasks, Content window, 1×1 stubs), which share the class.
+find_login_window() {
+    local w name width
+    for w in $(ibgw_windows); do
+        name=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowname "$w" 2>/dev/null || echo "")
+        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
+            | grep -oP 'Geometry: \K\d+' | head -1)
+        [[ -z "$width" ]] && continue
+        if [[ "$name" == *[Gg]ateway* && "$width" -ge 100 && "$width" -lt 900 ]]; then
+            echo "$w"; return 0
+        fi
+    done
+    return 1
+}
+
+# True when IBGW's wide main dashboard (≥900px "…Gateway") is open — i.e. we are
+# logged in. The login form and the post-login status window are the SAME ~790px
+# window (it transforms in place), so the only reliable "logged in" tell is the
+# main dashboard appearing alongside it.
+ibgw_main_window_present() {
+    local w name width
+    for w in $(ibgw_windows); do
+        name=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowname "$w" 2>/dev/null || echo "")
+        width=$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry "$w" 2>/dev/null \
+            | grep -oP 'Geometry: \K\d+' | head -1)
+        [[ -n "$width" && "$name" == *[Gg]ateway* && "$width" -ge 900 ]] && return 0
+    done
+    return 1
 }
 
 # IBKR rebrands the window TITLE between versions ("IB Gateway" → "IBKR Gateway"
