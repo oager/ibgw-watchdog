@@ -471,18 +471,27 @@ restart_and_login() {
 # button by position: on IBKR dialogs (e.g. the paper-trading "I understand and
 # accept") it sits low — ~88% of dialog height, not the 3/4 mark.
 _dismiss_ok() {
-    local dlg="$1" WINDOW X Y WIDTH HEIGHT SCREEN
+    local dlg="$1" X Y WIDTH HEIGHT ys
+    # Default button is focused, so Return usually does it.
     DISPLAY="$DISPLAY_ENV" xdotool windowactivate --sync "$dlg" 2>/dev/null || true
     sleep 0.4
     DISPLAY="$DISPLAY_ENV" xdotool key Return 2>/dev/null || true
     sleep 1
-    # If still mapped, click the default button via XTEST.
-    DISPLAY="$DISPLAY_ENV" xwininfo -id "$dlg" 2>/dev/null | grep -q IsViewable || return 0
-    eval "$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry --shell "$dlg" 2>/dev/null)"
-    [[ -n "${WIDTH:-}" && -n "${HEIGHT:-}" ]] || return 0
-    DISPLAY="$DISPLAY_ENV" xdotool mousemove $(( X + WIDTH / 2 )) $(( Y + HEIGHT * 88 / 100 )) 2>/dev/null || true
-    sleep 0.3
-    DISPLAY="$DISPLAY_ENV" xdotool click 1 2>/dev/null || true
+    # Fallback: click the default button via XTEST (real input -- Swing drops
+    # XSendEvent/--window clicks). The button bar sits ~22px above the dialog
+    # bottom edge regardless of dialog height, so target (bottom - N), not a
+    # height percentage. The old 88%-of-height aim landed ~10px high and left
+    # the paper-trading Warning stuck (incident 2026-06-11). Try a few offsets
+    # and bail the instant the dialog is gone.
+    for ys in 24 18 30; do
+        DISPLAY="$DISPLAY_ENV" xwininfo -id "$dlg" 2>/dev/null | grep -q IsViewable || return 0
+        eval "$(DISPLAY="$DISPLAY_ENV" xdotool getwindowgeometry --shell "$dlg" 2>/dev/null)"
+        [[ -n "${WIDTH:-}" && -n "${HEIGHT:-}" ]] || return 0
+        DISPLAY="$DISPLAY_ENV" xdotool mousemove $(( X + WIDTH / 2 )) $(( Y + HEIGHT - ys )) 2>/dev/null || true
+        sleep 0.3
+        DISPLAY="$DISPLAY_ENV" xdotool click 1 2>/dev/null || true
+        sleep 1
+    done
 }
 
 handle_login_error_dialog() {
