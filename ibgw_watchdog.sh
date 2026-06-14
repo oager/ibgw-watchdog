@@ -54,6 +54,7 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
 PORT_UP_TIMEOUT="${PORT_UP_TIMEOUT:-60}"
 LOGIN_WAIT="${LOGIN_WAIT:-30}"
 WINDOW_SETTLE="${WINDOW_SETTLE:-2}"
+RELOGIN_GRACE="${RELOGIN_GRACE:-90}"   # secs a "Re-login is required" window must persist before restart
 ESCALATION_CAP="${ESCALATION_CAP:-6}"
 PAPER_TRADING="${PAPER_TRADING:-true}"
 ALERT_DISCORD_WEBHOOK="${ALERT_DISCORD_WEBHOOK:-}"
@@ -66,6 +67,7 @@ BTN_X="${BTN_X:-395}";     BTN_Y="${BTN_Y:-375}"
 WARN_BTN_X="${WARN_BTN_X:-0}"; WARN_BTN_Y="${WARN_BTN_Y:-0}"
 
 consecutive_failures=0
+_relogin_first_seen=0
 
 mkdir -p "${LOG_DIR:-$HOME/logs}" "${SCREENSHOT_DIR:-$HOME/logs/ibgw_screenshots}"
 
@@ -535,6 +537,39 @@ handle_existing_session_dialog() {
     return 0
 }
 
+handle_relogin_required() {
+    # Second health check: catch the "port up but wedged" state that the port-down path
+    # and check_midsession_login_dialog both miss. IB can invalidate the session mid-run
+    # and pop a "Re-login is required" window while the dashboard stays open and port
+    # ${IBGW_PORT} keeps listening -- so nothing else fires and the API client sits
+    # disconnected (incident 2026-06-14: stuck ~8h on "Attempt 8: Authenticating...").
+    # Require the window to persist RELOGIN_GRACE seconds before acting, so a transient
+    # re-auth that IB self-clears does not trigger an unnecessary restart. A clean kill +
+    # restart_and_login is the right recovery -- NOT re-typing creds into the dashboard.
+    local win
+    win=$(DISPLAY="$DISPLAY_ENV" xdotool search --name "Re-login is required" 2>/dev/null | head -1 || true)
+    if [[ -z "$win" ]]; then
+        _relogin_first_seen=0
+        return 1
+    fi
+    local now; now=$(date +%s)
+    if [[ "$_relogin_first_seen" -eq 0 ]]; then
+        _relogin_first_seen=$now
+        log "'Re-login is required' window present (WID=$win) -- ${RELOGIN_GRACE}s grace before restart"
+        return 1
+    fi
+    if (( now - _relogin_first_seen < RELOGIN_GRACE )); then
+        return 1
+    fi
+    log "'Re-login is required' persisted >${RELOGIN_GRACE}s (WID=$win) -- port up but wedged; clean restart"
+    send_alert "WARNING" "IBGW Re-login Required (wedged)" \
+        "Port ${IBGW_PORT} up but IB demanded re-login and the session is stuck. Killing for a clean restart + login."
+    screenshot "relogin_required_wedged"
+    _relogin_first_seen=0
+    kill_ibgw; sleep 3; restart_and_login || true
+    return 0
+}
+
 check_midsession_login_dialog() {
     local wid
     wid=$(find_login_window) || return 1
@@ -580,6 +615,8 @@ while true; do
             kill_ibgw; sleep 3; restart_and_login || true
         elif handle_gateway_error_dialog; then
             kill_ibgw; sleep 3; restart_and_login || true
+        elif handle_relogin_required; then
+            :  # handler ran its own grace check + kill/restart
         else
             handle_existing_session_dialog || true
             check_midsession_login_dialog  || true
