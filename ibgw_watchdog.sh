@@ -46,7 +46,8 @@ fi
 # Defaults
 IBGW_PORT="${IBGW_PORT:-}"
 IBGW_BIN="${IBGW_BIN:-}"
-DISPLAY_ENV="${DISPLAY_ENV:-${DISPLAY:-:1}}"
+_ibgw_n="$(ls /tmp/.X11-unix/ 2>/dev/null | grep -oE "[0-9]+" | sort -n | head -1)"; _ibgw_autodisp="${_ibgw_n:+:$_ibgw_n}"
+DISPLAY_ENV="${DISPLAY_ENV:-${_ibgw_autodisp:-${DISPLAY:-:1}}}"
 CREDS_FILE="${CREDS_FILE:-$HOME/.ibgw_creds}"
 LOG_DIR="${LOG_DIR:-$HOME/logs}"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$LOG_DIR/ibgw_screenshots}"

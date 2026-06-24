@@ -14,7 +14,9 @@ IBGW_BIN=
 # X display the Gateway runs on. attach mode: your desktop/VNC display (often
 # :0 or :1). xvfb mode: :99. ./install.sh sets this for you when configuring
 # auto-start; set it by hand only if you start the watchdog manually.
-DISPLAY_ENV=:1
+# DISPLAY_ENV is AUTO-DETECTED from /tmp/.X11-unix/ (the live X display number can drift
+# across reboots). Uncomment to FORCE a specific display only if auto-detect fails:
+# DISPLAY_ENV=:0
 
 # Credentials file (separate from config for security). Format: IB_USER= / IB_PASS=
 # Create: touch ~/.ibgw_creds && chmod 600 ~/.ibgw_creds
