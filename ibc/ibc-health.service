@@ -1,0 +1,12 @@
+[Unit]
+Description=IBC gateway health monitor + Telegram alerts (port 4002)
+After=ibc-gateway.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash /home/oager/ibgw-watchdog/ibgw_watchdog.sh --monitor-only
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

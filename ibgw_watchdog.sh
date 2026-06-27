@@ -49,6 +49,7 @@ IBGW_BIN="${IBGW_BIN:-}"
 _ibgw_n="$(ls /tmp/.X11-unix/ 2>/dev/null | grep -oE "[0-9]+" | sort -n | head -1)"; _ibgw_autodisp="${_ibgw_n:+:$_ibgw_n}"
 DISPLAY_ENV="${DISPLAY_ENV:-${_ibgw_autodisp:-${DISPLAY:-:1}}}"
 CREDS_FILE="${CREDS_FILE:-$HOME/.ibgw_creds}"
+MONITOR_ONLY="${MONITOR_ONLY:-0}"
 LOG_DIR="${LOG_DIR:-$HOME/logs}"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$LOG_DIR/ibgw_screenshots}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
@@ -107,6 +108,26 @@ send_alert() {
 }
 
 discord_alert() { send_alert "$@"; }   # backwards compat
+
+_mon_down=0
+_monitor_tick() {
+    # IBC owns the gateway; this only watches the port + alerts (no login).
+    if port_up; then
+        if [[ $_mon_down -gt 0 ]]; then
+            send_alert "INFO" "IBGW recovered" "Port ${IBGW_PORT} back up after ${_mon_down} failed checks."
+            log "recovered after ${_mon_down} down-checks"
+        fi
+        _mon_down=0
+    else
+        _mon_down=$((_mon_down + 1))
+        log "port ${IBGW_PORT} DOWN (consecutive=${_mon_down})"
+        if [[ $_mon_down -eq 1 ]]; then
+            send_alert "WARNING" "IBGW port ${IBGW_PORT} DOWN" "First failed check; IBC/systemd should auto-restart."
+        elif [[ $_mon_down -eq $ESCALATION_CAP ]]; then
+            send_alert "CRITICAL" "IBGW still DOWN" "Port ${IBGW_PORT} down ${ESCALATION_CAP} checks (~$((ESCALATION_CAP * CHECK_INTERVAL))s). Manual check needed."
+        fi
+    fi
+}
 
 port_up() { timeout 2 bash -c ">/dev/tcp/127.0.0.1/${IBGW_PORT}" 2>/dev/null; }
 
@@ -589,6 +610,7 @@ check_midsession_login_dialog() {
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 case "${1:-}" in
+    --monitor-only|-m) MONITOR_ONLY=1 ;;
     --calibrate|-c) calibrate; exit 0 ;;
     --help|-h)
         cat <<HELP
@@ -603,12 +625,15 @@ HELP
 esac
 
 detect_port
-detect_ibgw_binary || true
+[[ "$MONITOR_ONLY" == "1" ]] || detect_ibgw_binary || true
 
 log "ibgw_watchdog started (PID $$, port ${IBGW_PORT}, interval ${CHECK_INTERVAL}s)"
 send_alert "INFO" "IBGW Watchdog Started" "Monitoring port ${IBGW_PORT}. PID $$."
 
 while true; do
+    if [[ "$MONITOR_ONLY" == "1" ]]; then
+        _monitor_tick; sleep "$CHECK_INTERVAL"; continue
+    fi
     if ! port_up; then
         restart_and_login || true
     else
