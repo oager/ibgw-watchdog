@@ -32,3 +32,7 @@ captures our setup. Paper gateway, API port 4002.
 ## Rollback
 The legacy xdotool watchdog (`ibgw_watchdog.sh`, full mode) is still here and works.
 `systemctl --user disable --now ibc-gateway ibc-health && systemctl --user enable --now ibgw-watchdog`.
+
+## Pinned versions (this deployment)
+- IBC **3.24.0**, IB Gateway **10.37** (`TWS_MAJOR_VRSN=1037` in `gatewaystart.sh`).
+- Paper trading, API port **4002**. Setting deltas from IBC stock: `config.ini.snippet`.

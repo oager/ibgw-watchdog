@@ -8,3 +8,11 @@ logs/
 
 # Tooling scratch
 .claude-flow/
+
+# IBC live config (real creds live in ~/ibc/config.ini on the box — never commit)
+config.ini
+ibc/config.ini
+# Editor / patch / watchdog backups
+*.bak
+*.bak-*
+*.orig
