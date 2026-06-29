@@ -6,6 +6,21 @@ Keeps Interactive Brokers Gateway running unattended — restarts it when it cra
 
 ---
 
+## Two modes
+
+This repo supports two ways to keep the Gateway logged in — **IBC mode is recommended.**
+
+| Mode | Login mechanism | Best for |
+|---|---|---|
+| **IBC** (recommended) | [IbcAlpha/IBC](https://github.com/IbcAlpha/IBC) logs in *from inside the JVM* — no X focus race, no dependency on the X display number | Robust unattended boot. The watchdog runs alongside it as a `--monitor-only` port-health probe + alerter (it does **not** log in — IBC owns that). |
+| **xdotool watchdog** | This script drives the Swing login form over X11 via `xdotool` | A self-contained option with no extra dependency, plus recovery from error dialogs IBC doesn't handle (soft-token/SSL modals), credential-leak safety, and session-conflict kill+restart |
+
+IBC sidesteps the X11-synthetic-input fragility the xdotool path has to fight (AWT filters synthetic events; the desktop steals focus at boot; the X display number drifts across reboots). **For a new install, prefer IBC** — full setup in [`ibc/README.md`](ibc/README.md). Either way `./install.sh` configures it (it asks which backend first).
+
+Health-probe-only invocation (used by IBC mode): `bash ibgw_watchdog.sh --monitor-only` — watches the API port and sends down/recover alerts, never touching login.
+
+---
+
 ## What it handles
 
 | Scenario | Action |
@@ -52,10 +67,12 @@ nohup bash ibgw_watchdog.sh >> ~/logs/ibgw_watchdog.log 2>&1 &
 
 ## Auto-start on boot
 
-`./install.sh` registers the watchdog as a **systemd user service** and enables
+`./install.sh` registers the chosen backend as **systemd user service(s)** and enables
 [linger](https://www.freedesktop.org/software/systemd/man/loginctl.html#enable-linger%20USER%E2%80%A6)
-so it starts at boot without an interactive login. It asks one question — how IB
-Gateway gets an X display:
+so it starts at boot without an interactive login. It first asks which **login backend** to use
+(IBC — recommended — or the xdotool watchdog). For **IBC** it installs `ibc-gateway.service` +
+`ibc-health.service` and you're done. For the **xdotool watchdog** it then asks how IB Gateway
+gets an X display:
 
 | Mode | Use when | Hands-off at boot? |
 |---|---|---|
@@ -152,7 +169,7 @@ IB Gateway uses Java Swing, which filters synthetic click events (`XSendEvent`) 
 
 ## Related
 
-[IBC (IbcAlpha)](https://github.com/IbcAlpha/IBC) — Java-based alternative that integrates more deeply with Gateway internals. This watchdog fills specific gaps: soft-token/SSL error dialog recovery, credential-leak safety, and kill+restart for session conflicts.
+[IBC (IbcAlpha)](https://github.com/IbcAlpha/IBC) — the **recommended login backend** (see **Two modes** above and [`ibc/README.md`](ibc/README.md)). IBC logs in from inside the JVM; this watchdog complements it as a `--monitor-only` health probe, and remains a self-contained alternative for error-dialog recovery (soft-token/SSL modals), credential-leak safety, and session-conflict kill+restart.
 
 ---
 

@@ -25,14 +25,123 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 die()  { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# ── IBC backend (recommended): in-JVM login via IbcAlpha/IBC ───────────────────
+# Installs ibc-gateway.service (IBC launches + logs into the Gateway) and
+# ibc-health.service (this watchdog in --monitor-only mode: port watch + alerts,
+# no login). Units are generated with the resolved HOME/display so nothing is
+# hard-coded. IBC itself must already be installed — see ibc/README.md.
+install_ibc() {
+    local IBC_DIR="$HOME/ibc"
+    local GATEWAYSTART="$IBC_DIR/gatewaystart.sh"
+    say ""
+    ok "IBC backend — IBC owns login; watchdog runs as a health probe"
+    [[ -x "$GATEWAYSTART" ]] || die "IBC not found at $GATEWAYSTART. Install IBC first — see ibc/README.md."
+    [[ -f "$IBC_DIR/config.ini" ]] || warn "No $IBC_DIR/config.ini yet (real creds) — see ibc/config.ini.snippet, then chmod 600 it."
+    command -v curl >/dev/null 2>&1 || warn "curl missing — health-probe alerts need it: sudo apt install -y curl"
+
+    # Gateway is a GUI even under IBC — resolve the X display + Xauthority it renders on.
+    local DISP XAUTH XN XAUTH_LINE
+    DISP="${DISPLAY:-}"
+    if [[ -z "$DISP" ]]; then
+        for sock in /tmp/.X11-unix/X*; do [[ -e "$sock" ]] && DISP=":${sock##*/X}" && break; done
+    fi
+    DISP="${DISP:-:0}"
+    read -r -p "X display the Gateway renders on (default ${DISP}): " d
+    DISP="${d:-$DISP}"
+    XN="${DISP#:}"; XN="${XN%%.*}"
+
+    XAUTH="${XAUTHORITY:-}"
+    [[ -z "$XAUTH" && -f "$HOME/.Xauthority" ]] && XAUTH="$HOME/.Xauthority"
+    [[ -z "$XAUTH" ]] && XAUTH="$(find "/run/user/$(id -u)" -maxdepth 2 -iname '*xauth*' 2>/dev/null | head -1 || true)"
+    read -r -p "XAUTHORITY file (default ${XAUTH:-none}): " x
+    XAUTH="${x:-$XAUTH}"
+    XAUTH_LINE=""; [[ -n "$XAUTH" ]] && XAUTH_LINE="Environment=XAUTHORITY=${XAUTH}"
+
+    mkdir -p "$USER_UNIT_DIR"
+
+    cat > "$USER_UNIT_DIR/ibc-gateway.service" <<EOF
+[Unit]
+Description=IB Gateway via IBC (port from config.ini)
+Wants=network-online.target
+After=network-online.target graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=DISPLAY=${DISP}
+${XAUTH_LINE}
+ExecStartPre=/bin/bash -c 'for i in \$(seq 1 30); do [ -e /tmp/.X11-unix/X${XN} ] && exit 0; sleep 1; done; exit 0'
+ExecStart=${GATEWAYSTART} -inline
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+EOF
+    ok "Wrote $USER_UNIT_DIR/ibc-gateway.service (DISPLAY=${DISP})"
+
+    cat > "$USER_UNIT_DIR/ibc-health.service" <<EOF
+[Unit]
+Description=IBC gateway health monitor + alerts (port watch, no login)
+After=ibc-gateway.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash ${WATCHDOG_SCRIPT} --monitor-only
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target
+EOF
+    ok "Wrote $USER_UNIT_DIR/ibc-health.service"
+
+    if [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" == "yes" ]]; then
+        ok "Linger already enabled for $USER"
+    elif loginctl enable-linger "$USER" 2>/dev/null; then
+        ok "Enabled linger for $USER (services start at boot)"
+    else
+        warn "Could not enable linger automatically. Run:  sudo loginctl enable-linger $USER"
+    fi
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now ibc-gateway.service ibc-health.service
+    ok "Enabled + started ibc-gateway.service + ibc-health.service"
+
+    say ""
+    say "================================================================="
+    say " IBC mode installed. IBC logs the Gateway in; the watchdog watches the port."
+    say "================================================================="
+    say ""
+    say "Status:   systemctl --user status ibc-gateway ibc-health"
+    say "Logs:     journalctl --user-unit ibc-gateway -f"
+    say "Disable:  systemctl --user disable --now ibc-gateway ibc-health"
+    say "Switch to the xdotool watchdog instead: re-run ./install.sh, choose backend 2"
+    say ""
+}
+
 [[ -f "$WATCHDOG_SCRIPT" ]] || die "ibgw_watchdog.sh not found next to install.sh"
-[[ -f "$TEMPLATE_DIR/ibgw-watchdog.service" ]] || die "systemd/ibgw-watchdog.service template missing"
 
 say ""
 say "================================================================="
 say " ibgw-watchdog installer — auto-start on boot (systemd user)"
 say "================================================================="
 say ""
+
+# ── 0. Login backend ──────────────────────────────────────────────────────────
+say "Login backend — how does the Gateway authenticate?"
+say "  1) IBC      — in-JVM login via IbcAlpha/IBC (recommended: robust, no X focus race)"
+say "  2) xdotool  — this watchdog drives the login form over X11 (legacy fallback)"
+say ""
+read -r -p "Choose [1/2] (default 1): " backend_choice
+case "${backend_choice:-1}" in
+    1) install_ibc; exit 0 ;;
+    2) ok "xdotool backend — configuring the login watchdog" ;;
+    *) die "Invalid choice '$backend_choice'" ;;
+esac
+
+# xdotool backend needs the systemd unit template:
+[[ -f "$TEMPLATE_DIR/ibgw-watchdog.service" ]] || die "systemd/ibgw-watchdog.service template missing"
 
 # ── 1. Display mode ───────────────────────────────────────────────────────────
 say "How does IB Gateway get an X display?"
