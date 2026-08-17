@@ -1,0 +1,38 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax
+        run: bash -n ibgw_watchdog.sh install.sh
+
+      - name: shellcheck
+        # SC2317 ("command appears unreachable") is excluded: it fired 35 times
+        # and every one is wrong -- shellcheck's reachability analysis gives up on
+        # the `case "${1:-}"` dispatcher at the bottom of ibgw_watchdog.sh, so it
+        # calls live functions dead (ibgw_windows() has 5 call sites). Everything
+        # else runs at default severity, so quoting bugs (SC2086 and friends)
+        # still fail the build.
+        run: shellcheck -e SC2317 ibgw_watchdog.sh install.sh
+
+      - name: ibc-gateway must survive the daily session logoff
+        # Regression guard for the 2026-08-05 outage. IB Gateway (paper) exits
+        # CLEANLY (code 0) on its mandatory daily "Exit Session Setting" logoff,
+        # so Restart=on-failure treated it as success and never relaunched --
+        # the gateway stayed dead ~3h and took every dependent bot offline.
+        # systemd-analyze verify does NOT catch this: on-failure is valid syntax.
+        run: |
+          grep -qx 'Restart=always' ibc/ibc-gateway.service || {
+            echo "::error file=ibc/ibc-gateway.service::must set Restart=always -- the gateway exits 0 on its daily logoff, so on-failure leaves it dead"
+            exit 1
+          }
