@@ -41,11 +41,13 @@ if [[ -z "$CONFIG_FILE" && "${1:-}" != "--help" && "${1:-}" != "-h" ]]; then
     exit 1
 fi
 
+# shellcheck source=/dev/null  # path is resolved at runtime by the search order above
 [[ -n "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
 # Defaults
 IBGW_PORT="${IBGW_PORT:-}"
 IBGW_BIN="${IBGW_BIN:-}"
+# shellcheck disable=SC2010,SC2012  # X11 names these sockets X0/X1/...; no non-alphanumeric case to handle
 _ibgw_n="$(ls /tmp/.X11-unix/ 2>/dev/null | grep -oE "[0-9]+" | sort -n | head -1)"; _ibgw_autodisp="${_ibgw_n:+:$_ibgw_n}"
 DISPLAY_ENV="${DISPLAY_ENV:-${_ibgw_autodisp:-${DISPLAY:-:1}}}"
 CREDS_FILE="${CREDS_FILE:-$HOME/.ibgw_creds}"
@@ -283,6 +285,7 @@ kill_ibgw() {
     # the caller never stacks a duplicate gateway.
     pkill -TERM -f "i4j_jres.*java" 2>/dev/null || true
     pkill -TERM -f "ibgateway"      2>/dev/null || true
+    # shellcheck disable=SC2034  # fixed-count retry; the index is deliberately unused
     local i
     for i in 1 2 3 4 5; do
         sleep 1
